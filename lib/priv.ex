@@ -16,25 +16,61 @@ defmodule Priv do
   defmacro __before_compile__(env) do
     replace_funcs = Module.get_attribute(env.module, :replace_register)
 
-    all_funcs = Module.get_attribute(env.module, :all_register)
-
     Module.put_attribute(env.module, :replace_ran, true)
 
-    new_functions =
-      Enum.map(replace_funcs, fn {name, body, args, module, tuple} ->
+    {private_functions, defpdelegates, _uniq_functions} =
+      Enum.reduce(replace_funcs, {[], [], []}, fn {name, body, args, guards, module, tuple},
+                                                  {private_functions, defpdelegates,
+                                                   uniq_functions} ->
         :elixir_def.take_definition(module, tuple)
 
-        quote do
-          def unquote(name)(unquote_splicing(args)), unquote(body)
+        private_function =
+          if Enum.any?(guards) do
+            quote do
+              def unquote(name)(unquote_splicing(args)) when unquote_splicing(guards),
+                  unquote(body)
+            end
+          else
+            quote do
+              def unquote(name)(unquote_splicing(args)), unquote(body)
+            end
+          end
+
+        function_signature = {name, Enum.count(args)}
+
+        if function_signature in uniq_functions do
+          {[private_function | private_functions], defpdelegates, uniq_functions}
+        else
+          defpdelegate =
+            quote do
+              defp unquote(name)(unquote_splicing(safe_args(args))),
+                do: apply(__MODULE__.Private, unquote(name), unquote(safe_args(args)))
+            end
+
+          {[private_function | private_functions], [defpdelegate | defpdelegates],
+           [function_signature | uniq_functions]}
         end
       end)
 
-    quote do
-
-      defmodule Private do
-        unquote(new_functions)
-      end
+    module = """
+    defmodule #{env.module}.Private do
+    #{Enum.map(private_functions, &(Macro.to_string(&1) <> "\n\n"))}
     end
+    """
+
+    Code.compile_string(module)
+
+    quote do
+      unquote(defpdelegates)
+    end
+  end
+
+  defp safe_args(args) do
+    args
+    |> Enum.with_index()
+    |> Enum.map(fn {_arg, index} ->
+      {String.to_atom("x_#{index}"), [], nil}
+    end)
   end
 
   def __on_definition__(env, :defp, name, args, guards, body) do
@@ -44,36 +80,11 @@ defmodule Priv do
       Module.put_attribute(
         env.module,
         :replace_register,
-        {name, body, args, env.module, tuple}
+        {name, body, args, guards, env.module, tuple}
       )
-
-      Module.put_attribute(env.module, :all_register, {name, body, args, env.module, tuple})
     end
   end
 
   def __on_definition__(_env, :def, _name, _args, _guards, _body) do
-  end
-end
-
-defmodule Sample do
-  use Priv
-
-  @moduledoc """
-  Documentation for Priv.
-  """
-
-  def i_am_public do
-    :world
-  end
-
-  def i_am_public_and_call_a_private_function do
-  end
-
-  defp i_am_private do
-    :came_from_private
-  end
-
-  defp i_am_also_private(x, y) do
-    x + y
   end
 end
