@@ -7,7 +7,6 @@ defmodule Priv do
   defmacro __using__(_env) do
     quote do
       Module.register_attribute(__MODULE__, :replace_register, accumulate: true)
-      Module.register_attribute(__MODULE__, :all_register, accumulate: true)
       @on_definition Priv
       @before_compile Priv
     end
@@ -16,9 +15,14 @@ defmodule Priv do
   defmacro __before_compile__(env) do
     replace_funcs = Module.get_attribute(env.module, :replace_register)
 
+
+    quote do
+      unquote(env)
+    end
+
     Module.put_attribute(env.module, :replace_ran, true)
 
-    {private_functions, defpdelegates, _uniq_functions} =
+    {private_functions, defpdelegates, uniq_functions} =
       Enum.reduce(replace_funcs, {[], [], []}, fn {name, body, args, guards, module, tuple},
                                                   {private_functions, defpdelegates,
                                                    uniq_functions} ->
@@ -86,5 +90,8 @@ defmodule Priv do
   end
 
   def __on_definition__(_env, :def, _name, _args, _guards, _body) do
+  end
+
+  def __on_definition__(_env, other, _name, _args, _guards, _body) do
   end
 end

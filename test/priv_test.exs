@@ -5,6 +5,8 @@ defmodule PrivTest do
     defmodule Math do
       use Priv
 
+      @doubler 2
+
       def add(x, y) do
         do_add(x, y)
       end
@@ -17,12 +19,21 @@ defmodule PrivTest do
         do_divide(x, y)
       end
 
+      @spec do_divide(number(), number()) :: {:ok, number()} | {:error, :divide_by_zero}
       defp do_divide(x, y) when y != 0 do
         {:ok, x / y}
       end
 
       defp do_divide(_x, 0) do
         {:error, :divide_by_zero}
+      end
+
+      def multiply(x) do
+        do_multiply(x)
+      end
+
+      defp do_multiply(x) do
+        x * @doubler
       end
     end
 
@@ -45,10 +56,12 @@ defmodule PrivTest do
     end
 
     test "guard causes on private fuctions are respected" do
-      assert_raise(UndefinedFunctionError, fn ->
-        assert Math.divide(4, 2) == 2
-        assert Math.divide(4, 0) == {:error, :divide_by_zero}
-      end)
+      assert PrivTest.Math.divide(4, 2) == {:ok, 2}
+      assert PrivTest.Math.divide(4, 0) == {:error, :divide_by_zero}
+    end
+
+    test "private functions should still be able to access module attributes" do
+      assert PrivTest.Math.multiply(4) == 8
     end
   end
 end
