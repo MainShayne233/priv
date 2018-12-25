@@ -2,8 +2,19 @@ defmodule PrivTest do
   use ExUnit.Case
 
   setup_all do
+    defmodule MathUtils.Helpers do
+      def triple(x), do: 3 * x
+
+      defmodule Constants do
+        def pi, do: 3.14
+      end
+    end
+
     defmodule Math do
       use Priv
+
+      alias MathUtils.Helpers
+      alias MathUtils.Helpers.Constants
 
       @doubler 2
 
@@ -35,6 +46,23 @@ defmodule PrivTest do
       defp do_multiply(x) do
         x * @doubler
       end
+
+      def triple_pi do
+        do_triple_pi()
+      end
+
+      def pi do
+        do_pi()
+      end
+
+      defp do_pi do
+        Constants.pi()
+      end
+
+      defp do_triple_pi do
+        Helpers.Constants.pi()
+        |> Helpers.triple()
+      end
     end
 
     :ok
@@ -62,6 +90,11 @@ defmodule PrivTest do
 
     test "private functions should still be able to access module attributes" do
       assert PrivTest.Math.multiply(4) == 8
+    end
+
+    test "private functions should still be able to use aliases made in parent function" do
+      assert PrivTest.Math.pi() == 3.14
+      assert PrivTest.Math.triple_pi() == 3 * 3.14
     end
   end
 end

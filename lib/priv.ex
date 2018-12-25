@@ -21,19 +21,46 @@ defmodule Priv do
 
     Module.put_attribute(env.module, :replace_ran, true)
 
-    {private_functions, defpdelegates, _uniq_functions, module_attributes} =
-      Enum.reduce(replace_funcs, {[], [], [], []}, fn {name, body, args, guards, module, tuple},
-                                                      {private_functions, defpdelegates,
-                                                       uniq_functions, module_attributes} ->
+    {private_functions, defpdelegates, _uniq_functions, module_attributes, aliases} =
+      Enum.reduce(replace_funcs, {[], [], [], [], []}, fn {name, body, args, guards, module,
+                                                           tuple},
+                                                          {private_functions, defpdelegates,
+                                                           uniq_functions, module_attributes,
+                                                           aliases} ->
         :elixir_def.take_definition(module, tuple)
 
-        {_, module_attributes_for_function} =
-          Macro.prewalk(body, [], fn
-            {:@, _, [{name, _, nil}]} = value, acc ->
-              {value, [name | acc]}
+        {_, {module_attributes_for_function, alias_uses}} =
+          Macro.prewalk(body, {[], []}, fn
+            {:@, _, [{name, _, nil}]} = value, {module_attributes, aliases} ->
+              {value, {[name | module_attributes], aliases}}
 
-            value, acc ->
-              {value, acc}
+            {:__aliases__, _, alias_path} = value, {module_attributes, aliases} ->
+              {value, {module_attributes, [alias_path | aliases]}}
+
+            value, {module_attributes, aliases} ->
+              {value, {module_attributes, aliases}}
+          end)
+
+        new_aliases =
+          Enum.reduce(alias_uses, [], fn alias_name, acc ->
+            [deepest_module | _] = Enum.reverse(alias_name)
+            module_name = :"Elixir.#{Atom.to_string(deepest_module)}"
+
+            env.aliases
+            |> Enum.find(fn
+              {^module_name, _full_module_path} ->
+                true
+
+              _other ->
+                false
+            end)
+            |> case do
+              {_alias_name, alias_path} ->
+                [{List.last(alias_name), alias_path} | acc]
+
+              _other ->
+                acc
+            end
           end)
 
         private_function =
@@ -52,7 +79,7 @@ defmodule Priv do
 
         if function_signature in uniq_functions do
           {[private_function | private_functions], defpdelegates, uniq_functions,
-           module_attributes_for_function ++ module_attributes}
+           module_attributes_for_function ++ module_attributes, new_aliases ++ aliases}
         else
           defpdelegate =
             quote do
@@ -62,7 +89,7 @@ defmodule Priv do
 
           {[private_function | private_functions], [defpdelegate | defpdelegates],
            [function_signature | uniq_functions],
-           module_attributes_for_function ++ module_attributes}
+           module_attributes_for_function ++ module_attributes, new_aliases ++ aliases}
         end
       end)
 
@@ -73,8 +100,16 @@ defmodule Priv do
         "@#{attribute_name} #{Module.get_attribute(env.module, attribute_name)}"
       end)
 
+    alias_declarations =
+      aliases
+      |> Enum.uniq()
+      |> Enum.map(fn {alias_name, alias_path} ->
+        "alias #{alias_path}, as: #{alias_name}"
+      end)
+
     module = """
     defmodule #{env.module}.Private do
+    #{Enum.join(alias_declarations, "\n")}
     #{Enum.join(module_attribute_declarations, "\n")}
 
     #{Enum.map(private_functions, &(Macro.to_string(&1) <> "\n\n"))}
