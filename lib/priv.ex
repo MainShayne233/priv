@@ -15,18 +15,26 @@ defmodule Priv do
   defmacro __before_compile__(env) do
     replace_funcs = Module.get_attribute(env.module, :replace_register)
 
-
     quote do
       unquote(env)
     end
 
     Module.put_attribute(env.module, :replace_ran, true)
 
-    {private_functions, defpdelegates, uniq_functions} =
-      Enum.reduce(replace_funcs, {[], [], []}, fn {name, body, args, guards, module, tuple},
-                                                  {private_functions, defpdelegates,
-                                                   uniq_functions} ->
+    {private_functions, defpdelegates, _uniq_functions, module_attributes} =
+      Enum.reduce(replace_funcs, {[], [], [], []}, fn {name, body, args, guards, module, tuple},
+                                                      {private_functions, defpdelegates,
+                                                       uniq_functions, module_attributes} ->
         :elixir_def.take_definition(module, tuple)
+
+        {_, module_attributes_for_function} =
+          Macro.prewalk(body, [], fn
+            {:@, _, [{name, _, nil}]} = value, acc ->
+              {value, [name | acc]}
+
+            value, acc ->
+              {value, acc}
+          end)
 
         private_function =
           if Enum.any?(guards) do
@@ -43,7 +51,8 @@ defmodule Priv do
         function_signature = {name, Enum.count(args)}
 
         if function_signature in uniq_functions do
-          {[private_function | private_functions], defpdelegates, uniq_functions}
+          {[private_function | private_functions], defpdelegates, uniq_functions,
+           module_attributes_for_function ++ module_attributes}
         else
           defpdelegate =
             quote do
@@ -52,12 +61,22 @@ defmodule Priv do
             end
 
           {[private_function | private_functions], [defpdelegate | defpdelegates],
-           [function_signature | uniq_functions]}
+           [function_signature | uniq_functions],
+           module_attributes_for_function ++ module_attributes}
         end
+      end)
+
+    module_attribute_declarations =
+      module_attributes
+      |> Enum.uniq()
+      |> Enum.map(fn attribute_name ->
+        "@#{attribute_name} #{Module.get_attribute(env.module, attribute_name)}"
       end)
 
     module = """
     defmodule #{env.module}.Private do
+    #{Enum.join(module_attribute_declarations, "\n")}
+
     #{Enum.map(private_functions, &(Macro.to_string(&1) <> "\n\n"))}
     end
     """
@@ -89,9 +108,6 @@ defmodule Priv do
     end
   end
 
-  def __on_definition__(_env, :def, _name, _args, _guards, _body) do
-  end
-
-  def __on_definition__(_env, other, _name, _args, _guards, _body) do
+  def __on_definition__(_env, _other, _name, _args, _guards, _body) do
   end
 end
