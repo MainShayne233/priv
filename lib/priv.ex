@@ -15,9 +15,17 @@ defmodule Priv do
   defmacro __before_compile__(env) do
     replace_funcs = Module.get_attribute(env.module, :replace_register)
 
-    quote do
-      unquote(env)
-    end
+    require_declarations =
+      Enum.filter(env.requires, fn
+        __MODULE__ ->
+          false
+
+        _other ->
+          true
+      end)
+      |> Enum.map(fn require_name ->
+        "require #{require_name}"
+      end)
 
     Module.put_attribute(env.module, :replace_ran, true)
 
@@ -109,6 +117,7 @@ defmodule Priv do
 
     module = """
     defmodule #{env.module}.Private do
+    #{Enum.join(require_declarations, "\n")}
     #{Enum.join(alias_declarations, "\n")}
     #{Enum.join(module_attribute_declarations, "\n")}
 

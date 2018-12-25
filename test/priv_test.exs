@@ -16,6 +16,8 @@ defmodule PrivTest do
       alias MathUtils.Helpers
       alias MathUtils.Helpers.Constants
 
+      require Logger
+
       @doubler 2
 
       def add(x, y) do
@@ -63,6 +65,16 @@ defmodule PrivTest do
         Helpers.Constants.pi()
         |> Helpers.triple()
       end
+
+      def add_with_log(x, y) do
+        do_add_with_log(x, y)
+      end
+
+      defp do_add_with_log(x, y) do
+        result = x + y
+        Logger.info("#{x} + #{y} == #{result}")
+        result
+      end
     end
 
     :ok
@@ -95,6 +107,12 @@ defmodule PrivTest do
     test "private functions should still be able to use aliases made in parent function" do
       assert PrivTest.Math.pi() == 3.14
       assert PrivTest.Math.triple_pi() == 3 * 3.14
+    end
+
+    test "private functions should still be able to access any requires" do
+      assert ExUnit.CaptureLog.capture_log(fn ->
+               PrivTest.Math.add_with_log(2, 3)
+             end) =~ "2 + 3 == 5"
     end
   end
 end
