@@ -12,20 +12,37 @@ defmodule Priv do
     end
   end
 
+  defp get_require_declarations(env) do
+    Enum.filter(env.requires, fn
+      __MODULE__ ->
+        false
+
+      _other ->
+        true
+    end)
+    |> Enum.map(fn require_name ->
+      "require #{require_name}"
+    end)
+  end
+
+  defp extract_body_data(body) do
+    {_, {module_attributes, alias_uses}} =
+      Macro.prewalk(body, {[], []}, fn
+        {:@, _, [{name, _, nil}]} = value, {module_attributes, aliases} ->
+          {value, {[name | module_attributes], aliases}}
+
+        {:__aliases__, _, alias_path} = value, {module_attributes, aliases} ->
+          {value, {module_attributes, [alias_path | aliases]}}
+
+        value, {module_attributes, aliases} ->
+          {value, {module_attributes, aliases}}
+      end)
+
+    %{module_attributes: module_attributes, alias_uses: alias_uses}
+  end
+
   defmacro __before_compile__(env) do
     replace_funcs = Module.get_attribute(env.module, :replace_register)
-
-    require_declarations =
-      Enum.filter(env.requires, fn
-        __MODULE__ ->
-          false
-
-        _other ->
-          true
-      end)
-      |> Enum.map(fn require_name ->
-        "require #{require_name}"
-      end)
 
     Module.put_attribute(env.module, :replace_ran, true)
 
@@ -37,17 +54,7 @@ defmodule Priv do
                                                            aliases} ->
         :elixir_def.take_definition(module, tuple)
 
-        {_, {module_attributes_for_function, alias_uses}} =
-          Macro.prewalk(body, {[], []}, fn
-            {:@, _, [{name, _, nil}]} = value, {module_attributes, aliases} ->
-              {value, {[name | module_attributes], aliases}}
-
-            {:__aliases__, _, alias_path} = value, {module_attributes, aliases} ->
-              {value, {module_attributes, [alias_path | aliases]}}
-
-            value, {module_attributes, aliases} ->
-              {value, {module_attributes, aliases}}
-          end)
+        %{module_attributes: module_attributes_for_function, alias_uses: alias_uses} = extract_body_data(body)
 
         new_aliases =
           Enum.reduce(alias_uses, [], fn alias_name, acc ->
@@ -117,11 +124,11 @@ defmodule Priv do
 
     module = """
     defmodule #{env.module}.Private do
-    #{Enum.join(require_declarations, "\n")}
-    #{Enum.join(alias_declarations, "\n")}
-    #{Enum.join(module_attribute_declarations, "\n")}
+      #{Enum.join(get_require_declarations(env), "\n")}
+      #{Enum.join(alias_declarations, "\n")}
+      #{Enum.join(module_attribute_declarations, "\n")}
 
-    #{Enum.map(private_functions, &(Macro.to_string(&1) <> "\n\n"))}
+      #{Enum.map(private_functions, &(Macro.to_string(&1) <> "\n\n"))}
     end
     """
 
